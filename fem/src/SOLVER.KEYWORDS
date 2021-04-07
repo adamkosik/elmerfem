@@ -1821,4 +1821,4 @@ solver:logical:      'use elemental coilcurrent'
 bodyforce:real:      'current density multiplier'
 solver:logical:      'nonlinear system nodal norm'
 solver:logical:      'steady state nodal norm'
-
+simulation:logical:  'parallel slices'

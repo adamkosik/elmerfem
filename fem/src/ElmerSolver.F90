@@ -77,7 +77,7 @@
      REAL(KIND=dP), POINTER :: WorkA(:,:,:) => NULL()
      REAL(KIND=dp), POINTER, SAVE :: sTime(:), sStep(:), sInterval(:), sSize(:), &
          steadyIt(:),nonlinIt(:),sPrevSizes(:,:),sPeriodic(:),sScan(:),&
-         sSweep(:),sPar(:),sFinish(:),sProduce(:)
+         sSweep(:),sPar(:),sFinish(:),sProduce(:),sSlice(:),sSliceRatio(:),sSliceWeight(:)
 
      LOGICAL :: GotIt,Transient,Scanning, LastSaved, MeshMode = .FALSE.
 
@@ -714,7 +714,8 @@ END INTERFACE
        IF ( FirstLoad ) &
            ALLOCATE( sTime(1), sStep(1), sInterval(1), sSize(1), &
            steadyIt(1), nonLinit(1), sPrevSizes(1,5), sPeriodic(1), &
-           sPar(1), sScan(1), sSweep(1), sFinish(1), sProduce(1) )
+           sPar(1), sScan(1), sSweep(1), sFinish(1), sProduce(1),&
+           sSlice(1), sSliceRatio(1), sSliceWeight(1) )
        
        dt = 0._dp       
        sTime = 0._dp
@@ -729,6 +730,9 @@ END INTERFACE
        sPar = 0
        sFinish = -1.0_dp
        sProduce = -1.0_dp
+       sSlice = 0._dp
+       sSliceRatio = 0._dp
+       sSliceWeight = 1.0_dp
        
      END SUBROUTINE InitializeIntervals
        
@@ -1211,7 +1215,7 @@ END INTERFACE
   SUBROUTINE AddMeshCoordinatesAndTime()
 !------------------------------------------------------------------------------
      TYPE(Variable_t), POINTER :: DtVar
-
+     
      CALL Info('AddMeshCoordinatesAndTime','Setting mesh coordinates and time',Level=10)
 
      NULLIFY( Solver )
@@ -1261,14 +1265,21 @@ END INTERFACE
        sPar(1) = 1.0_dp * ParEnv % MyPe 
        CALL VariableAdd( Mesh % Variables, Mesh, Name='Partition', DOFs=1, Values=sPar ) 
 
+       IF( ListCheckPresent( CurrentModel % Simulation,'Parallel Slices') ) THEN
+         CALL VariableAdd( Mesh % Variables, Mesh, Name='slice', DOFs=1, Values=sSlice )
+         CALL VariableAdd( Mesh % Variables, Mesh, Name='slice ratio', DOFs=1, Values=sSliceRatio )
+         CALL VariableAdd( Mesh % Variables, Mesh, Name='slice weight', DOFs=1, Values=sSliceWeight )
+       END IF
+       
+       
        ! Add partition as a elemental field in case we have just one partition
        ! and have asked still for partitioning into many.
        IF( ParEnv % PEs == 1 .AND. ASSOCIATED( Mesh % Repartition ) ) THEN
          BLOCK
            REAL(KIND=dp), POINTER :: PartField(:)
            INTEGER, POINTER :: PartPerm(:)
-           INTEGER :: i, n
-
+           INTEGER :: i,n
+           
            CALL Info('AddMeshCoordinatesAndTime','Adding partitioning also as a field')
            
            n = Mesh % NumberOfBulkElements
@@ -2156,8 +2167,8 @@ END INTERFACE
      TYPE(AdaptiveVariables_t), ALLOCATABLE, SAVE :: AdaptVars(:)     
      REAL(KIND=dp) :: newtime, prevtime=0, maxtime, exitcond
      INTEGER, SAVE :: PrevMeshI = 0
-     INTEGER :: nPeriodic
-     LOGICAL :: ParallelTime
+     INTEGER :: nPeriodic, nSlices
+     LOGICAL :: ParallelTime, ParallelSlices
      
      !$OMP PARALLEL
      IF(.NOT.GaussPointsInitialized()) CALL GaussPointsInit()
@@ -2198,7 +2209,7 @@ END INTERFACE
      cum_Timestep = 0
      ddt = -1.0_dp
 
-
+     ! For parallel timestepping we need to divide the periodic timesteps for each partition. 
      ParallelTime = ListGetLogical( CurrentModel % Simulation,'Parallel Timestepping', GotIt ) &
          .AND. ( ParEnv % PEs > 1 ) 
      nPeriodic = ListGetInteger( CurrentModel % Simulation,'Periodic Timesteps',GotIt )
@@ -2213,7 +2224,21 @@ END INTERFACE
          CALL Fatal('ExecSimulation','Parallel timestepping requires "Periodic Timesteps"')
        END IF
      END IF
-       
+
+     ! For parallel slices we need to introduce the slices
+     ParallelSlices = ListGetLogical( CurrentModel % Simulation,'Parallel Slices',GotIt ) &
+         .AND. ( ParEnv % PEs > 1 ) 
+     IF( ParallelSlices ) THEN
+       sSlice = 1.0_dp * ParEnv % MyPe 
+       sSliceRatio = ( ParEnv % MyPe + 0.5_dp ) / ParEnv % PEs 
+       sSliceWeight = 1.0_dp / ParEnv % PEs
+
+       PRINT *,'ParallelSlices:',ParEnv % MyPe, sSlice, sSliceRatio, sSliceWeight
+     END IF
+
+
+
+     
      
      DO interval = 1,TimeIntervals
        
