@@ -21147,7 +21147,7 @@ CONTAINS
      REAL(KIND=dp), ALLOCATABLE :: PeriodicSol(:,:), PeriodicMult(:,:), PeriodicNrm(:), &
          PeriodicChange(:), dx(:), dy(:)
      REAL(KIND=dp), POINTER :: x(:), y(:)
-     INTEGER :: n, m, Ncycle, Ntime, Nguess, Nstore, GuessMode, Nconv, N1st 
+     INTEGER :: n, m, Ncycle, Ntime, Nguess, Nstore, GuessMode, Nconv, N1st, Ntimes 
      LOGICAL :: ExportMult, ParallelTime, PeriodicConv
      TYPE(Variable_t), POINTER :: Var
      CHARACTER(LEN=MAX_NAME_LEN) :: MultName
@@ -21168,11 +21168,10 @@ CONTAINS
      IF( NINT(v % Values(1)) > 1 ) RETURN
 
      Ncycle = ListGetInteger( Model % Simulation,'Periodic Timesteps')
-     ParallelTime = ListGetLogical( Model % Simulation,'Parallel Timestepping',Found ) .AND. &
-         ( ParEnv % PEs > 1 )
-     IF( ParallelTime ) THEN
-       Ncycle = Ncycle / ParEnv % PEs
-     END IF
+     Ntimes = ListGetInteger( Model % Simulation,'Number of Times',Found )  
+     
+     ParallelTime = ( Ntimes > 1 )
+     IF( ParallelTime ) Ncycle = Ncycle / Ntimes
      
      v => VariableGet( Solver % Mesh % Variables, 'timestep' )
      Ntime = NINT(v % Values(1))
@@ -21340,7 +21339,7 @@ CONTAINS
        INTEGER :: toproc, fromproc
        INTEGER :: mpistat(MPI_STATUS_SIZE), ierr
        REAL(KIND=dp), ALLOCATABLE :: tovals(:), fromvals(:)
-       INTEGER :: rank, size
+       INTEGER :: rank, size, Nslices
        INTEGER :: mpitag
        INTEGER, SAVE :: VisitedTimes = 0
 
@@ -21349,8 +21348,12 @@ CONTAINS
        CALL Info(Caller,'Communicating data between time segments!',Level=5)
        
        ! Sent data forward in time.
-       toproc = MODULO( ParEnv % MyPe + 1, ParEnv % PEs )
-       fromproc = MODULO( ParEnv % MyPe - 1, ParEnv % PEs )
+       ! For multislice model the offset to next/previous partition is bigger. 
+       Nslices = ListGetInteger( CurrentModel % Simulation,'Number of Slices',Found )
+       IF(.NOT. Found) Nslices = 1
+              
+       toproc = MODULO( ParEnv % MyPe + Nslices, ParEnv % PEs )
+       fromproc = MODULO( ParEnv % MyPe - Nslices, ParEnv % PEs )
             
        ALLOCATE( tovals(n), fromvals(n) )
 

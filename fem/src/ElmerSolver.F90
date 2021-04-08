@@ -2167,7 +2167,7 @@ END INTERFACE
      TYPE(AdaptiveVariables_t), ALLOCATABLE, SAVE :: AdaptVars(:)     
      REAL(KIND=dp) :: newtime, prevtime=0, maxtime, exitcond
      INTEGER, SAVE :: PrevMeshI = 0
-     INTEGER :: nPeriodic, nSlices
+     INTEGER :: nPeriodic, nSlices, nTimes, iSlice, iTime
      LOGICAL :: ParallelTime, ParallelSlices
      
      !$OMP PARALLEL
@@ -2212,33 +2212,55 @@ END INTERFACE
      ! For parallel timestepping we need to divide the periodic timesteps for each partition. 
      ParallelTime = ListGetLogical( CurrentModel % Simulation,'Parallel Timestepping', GotIt ) &
          .AND. ( ParEnv % PEs > 1 ) 
-     nPeriodic = ListGetInteger( CurrentModel % Simulation,'Periodic Timesteps',GotIt )
-     IF( ParallelTime ) THEN
-       IF( MODULO( nPeriodic, ParEnv % PEs ) /= 0 ) THEN
-         CALL Fatal('ExecSimulation','For parallel timestepping "Periodic Timesteps" must be divisible by #np')
-       END IF
-       nPeriodic = nPeriodic / ParEnv % PEs
-     END IF
-     IF( ParallelTime ) THEN
-       IF( nPeriodic == 0 ) THEN
-         CALL Fatal('ExecSimulation','Parallel timestepping requires "Periodic Timesteps"')
-       END IF
-     END IF
 
      ! For parallel slices we need to introduce the slices
      ParallelSlices = ListGetLogical( CurrentModel % Simulation,'Parallel Slices',GotIt ) &
          .AND. ( ParEnv % PEs > 1 ) 
-     IF( ParallelSlices ) THEN
-       sSlice = 1.0_dp * ParEnv % MyPe 
-       sSliceRatio = ( ParEnv % MyPe + 0.5_dp ) / ParEnv % PEs 
-       sSliceWeight = 1.0_dp / ParEnv % PEs
-
-       PRINT *,'ParallelSlices:',ParEnv % MyPe, sSlice, sSliceRatio, sSliceWeight
+     nSlices = 1
+     nTimes = 1
+     IF( ParallelTime .AND. ParallelSlices ) THEN
+       nSlices = ListGetInteger( CurrentModel % Simulation,'Number Of Slices',GotIt)
+       IF( nSlices <= 0 ) THEN
+         CALL Fatal('ExecSimulation','We need "Number Of Slices" with parallel timestepping')
+       END IF
+       IF( MODULO( ParEnv % PEs, nSlices ) /= 0 ) THEN
+         CALL Fatal('ExecSimulation','For hybrid parallellism #np must be divisible with "Number of Slices"')
+       END IF
+       nTimes = ParEnv % PEs / nSlices 
+       CALL ListAddInteger( CurrentModel % Simulation,'Number Of Times',nTimes )
+       iSlice = MODULO( ParEnv % MyPe, nSlices ) 
+       iTime = ParEnv % MyPe / nSlices
+     ELSE IF( ParallelTime ) THEN
+       nTimes = ParEnv % PEs
+       iTime = ParEnv % MyPe
+       CALL ListAddInteger( CurrentModel % Simulation,'Number Of Times',nTimes )
+       CALL ListAddInteger( CurrentModel % Simulation,'Number Of Slices',nSlices )
+       CALL Info('ExecSimulation','Setting one time sector for each partition!')
+     ELSE IF( ParallelSlices ) THEN
+       nSlices = ParEnv % PEs
+       iSlice = ParEnv % MyPe
+       CALL ListAddInteger( CurrentModel % Simulation,'Number Of Times',nTimes )
+       CALL ListAddInteger( CurrentModel % Simulation,'Number Of Slices',nSlices )
+       CALL Info('ExecSimulation','Setting one slice for each partition!')
+     END IF
+    
+     nPeriodic = ListGetInteger( CurrentModel % Simulation,'Periodic Timesteps',GotIt )
+     IF( ParallelTime ) THEN
+       IF( nPeriodic <= 0 ) THEN
+         CALL Fatal('ExecSimulation','Parallel timestepping requires "Periodic Timesteps"')
+       END IF
+       IF( MODULO( nPeriodic, nTimes ) /= 0 ) THEN
+         CALL Fatal('ExecSimulation','For parallel timestepping "Periodic Timesteps" must be divisible by #np')
+       END IF
+       nPeriodic = nPeriodic / nTimes
      END IF
 
+     IF( ParallelSlices ) THEN
+       sSlice = 1.0_dp * iSlice
+       sSliceRatio = ( iSlice + 0.5_dp ) / nSlices
+       sSliceWeight = 1.0_dp / nSlices 
+     END IF
 
-
-     
      
      DO interval = 1,TimeIntervals
        
