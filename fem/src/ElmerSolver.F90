@@ -2215,9 +2215,13 @@ END INTERFACE
 
      ! For parallel slices we need to introduce the slices
      ParallelSlices = ListGetLogical( CurrentModel % Simulation,'Parallel Slices',GotIt ) &
-         .AND. ( ParEnv % PEs > 1 ) 
+         .AND. ( ParEnv % PEs > 1 )
+     
      nSlices = 1
      nTimes = 1
+     iTime = 0
+     iSlice = 0 
+     
      IF( ParallelTime .AND. ParallelSlices ) THEN
        nSlices = ListGetInteger( CurrentModel % Simulation,'Number Of Slices',GotIt)
        IF( nSlices <= 0 ) THEN
@@ -2243,7 +2247,7 @@ END INTERFACE
        CALL ListAddInteger( CurrentModel % Simulation,'Number Of Slices',nSlices )
        CALL Info('ExecSimulation','Setting one slice for each partition!')
      END IF
-    
+     
      nPeriodic = ListGetInteger( CurrentModel % Simulation,'Periodic Timesteps',GotIt )
      IF( ParallelTime ) THEN
        IF( nPeriodic <= 0 ) THEN
@@ -2254,13 +2258,18 @@ END INTERFACE
        END IF
        nPeriodic = nPeriodic / nTimes
      END IF
-
-     IF( ParallelSlices ) THEN
-       sSlice = 1.0_dp * iSlice
-       sSliceRatio = ( iSlice + 0.5_dp ) / nSlices
-       sSliceWeight = 1.0_dp / nSlices 
+     
+     IF( ListGetLogical( CurrentModel % Simulation,'Parallel Slices',GotIt ) ) THEN
+       IF( nSlices <= 1 ) THEN
+         sSlice = 0.0_dp
+         sSliceRatio = 1.0_dp
+         sSliceWeight = 1.0_dp
+       ELSE
+         sSlice = 1.0_dp * iSlice
+         sSliceRatio = ( iSlice + 0.5_dp ) / nSlices
+         sSliceWeight = 1.0_dp / nSlices 
+       END IF
      END IF
-
      
      DO interval = 1,TimeIntervals
        
@@ -2391,22 +2400,24 @@ END INTERFACE
          sTime(1) = sTime(1) + dt
 
          IF( nPeriodic > 0 ) THEN
-           timePeriod = ParEnv % PEs * nPeriodic * dt           
            IF( ParallelTime ) THEN
+             timePeriod = nTimes * nPeriodic * dt                        
              IF( cum_Timestep == 1 ) THEN
-               sTime(1) = sTime(1) + ParEnv % MyPe * nPeriodic * dt
+               sTime(1) = sTime(1) + iTime * nPeriodic * dt
              ELSE IF( MODULO( cum_Timestep, nPeriodic ) == 1 ) THEN
                CALL Info('ExecSimulation','Making jump in time-parallel scheme!')
-               sTime(1) = sTime(1) + nPeriodic * (ParEnv % PEs - 1) * dt
+               sTime(1) = sTime(1) + nPeriodic * (nTimes - 1) * dt
              END IF
+           ELSE
+             timePeriod = nPeriodic * dt           
            END IF
          END IF
                   
-         sPeriodic(1) = sTime(1)
+         sPeriodic(1) = sTime(1)         
          DO WHILE(sPeriodic(1) > timePeriod)
            sPeriodic(1) = sPeriodic(1) - timePeriod 
          END DO
-
+         
          ! Move the old timesteps one step down the ladder
          IF(timestep > 1 .OR. interval > 1) THEN
            DO i = SIZE(sPrevSizes,2),2,-1
