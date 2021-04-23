@@ -649,6 +649,7 @@ END INTERFACE
                'defined for transient and scanning simulations' )
          END IF
 
+#if 0
          IF( ListGetLogical( CurrentModel % Simulation,'Parallel Timestepping',GotIt ) ) THEN
            DO i=1,SIZE(Timesteps,1)
              IF( MODULO( Timesteps(i), ParEnv % PEs ) /= 0 ) THEN
@@ -658,6 +659,7 @@ END INTERFACE
            END DO
            CALL Info('ElmerSolver','Divided timestep intervals equally for each partition!',Level=4)
          END IF
+#endif
          
          TimestepSizes => ListGetConstRealArray( CurrentModel % Simulation, &
              'Timestep Sizes', GotIt )
@@ -2247,6 +2249,18 @@ END INTERFACE
        CALL ListAddInteger( CurrentModel % Simulation,'Number Of Slices',nSlices )
        CALL Info('ExecSimulation','Setting one slice for each partition!')
      END IF
+
+     IF( nTimes > 1 ) THEN
+       DO i=1,SIZE(Timesteps,1)
+         IF( MODULO( Timesteps(i), nTimes ) /= 0 ) THEN
+           CALL Fatal('ExecSimulation','"Timestep Intervals" should be divisible by nTimes: '//TRIM(I2S(nTimes)))
+         END IF
+         Timesteps(i) = Timesteps(i) / nTimes
+       END DO
+       CALL Info('ExecSimulation','Divided timestep intervals equally for each partition!',Level=4)
+     END IF
+
+
      
      nPeriodic = ListGetInteger( CurrentModel % Simulation,'Periodic Timesteps',GotIt )
      IF( ParallelTime ) THEN
